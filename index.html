@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Bird</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+    }
+    #canvas {
+      background-color: #30c0df;
+      width: 100vw;
+      max-width: 360px; /* 9:16 ratio, 360x640 for mobile */
+      height: 640px;
+      display: block;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css?family=Squada+One&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="canvas" width="360" height="640"></canvas>
+  <script>
+    const RAD = Math.PI / 180;
+    const scrn = document.getElementById("canvas");
+    const sctx = scrn.getContext("2d");
+    scrn.tabIndex = 1;
+
+    let frames = 0;
+    let dx = 2;
+    let pipeCounter = 0;
+    const state = {
+      curr: 0,
+      getReady: 0,
+      Play: 1,
+      gameOver: 2,
+    };
+
+    const SFX = {
+      flap: null,
+      hit: null,
+      enabled: false, // Flag to check if audio is supported
+    };
+
+    // Function to attempt loading an audio file with error handling
+    function loadAudio(src) {
+      try {
+        const audio = new Audio(src);
+        audio.preload = "auto";
+        audio.onerror = () => {
+          console.warn(`Failed to load audio: ${src}`);
+          SFX.enabled = false;
+        };
+        return audio;
+      } catch (e) {
+        console.warn(`Error creating audio for ${src}: ${e.message}`);
+        return null;
+      }
+    }
+
+    // Initialize audio files
+    const audioSources = {
+      flap: "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/flap-hOU0RRI06RTdOayr0EEnkUWO0gS5Sc.mp3?pHU7",
+      hit: "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/hit-9EbLzVtiNs8XYbH2t2TcUQgjEGmiWP.mp3?IK1m",
+    };
+
+    // Load audio files and set enabled flag
+    SFX.flap = loadAudio(audioSources.flap);
+    SFX.hit = loadAudio(audioSources.hit);
+    SFX.enabled = SFX.flap && SFX.hit;
+
+    // Safe play function to avoid errors if audio is null or disabled
+    function safePlay(audio) {
+      if (SFX.enabled && audio) {
+        audio.play().catch((e) => console.warn(`Audio play failed: ${e.message}`));
+      }
+    }
+
+    const bg = {
+      sprite: new Image(),
+      x: 0,
+      y: 0,
+      draw: function () {
+        const aspectRatio = this.sprite.width / this.sprite.height;
+        const canvasAspect = scrn.width / scrn.height;
+        let drawWidth, drawHeight, offsetX, offsetY;
+
+        if (aspectRatio > canvasAspect) {
+          drawWidth = scrn.height * aspectRatio;
+          drawHeight = scrn.height;
+          offsetX = (scrn.width - drawWidth) / 2;
+          offsetY = 0;
+        } else {
+          drawWidth = scrn.width;
+          drawHeight = scrn.width / aspectRatio;
+          offsetX = 0;
+          offsetY = (scrn.height - drawHeight) / 2;
+        }
+
+        sctx.drawImage(this.sprite, this.x + offsetX, offsetY, drawWidth, drawHeight);
+        sctx.drawImage(this.sprite, this.x + drawWidth + offsetX, offsetY, drawWidth, drawHeight);
+      },
+      update: function () {
+        if (state.curr != state.Play) return;
+        this.x = (this.x - dx) % scrn.width;
+      },
+    };
+
+    const pipe = {
+      spriteTop: new Image(),
+      spriteBot: new Image(),
+      gap: 120,
+      scale: 0.7,
+      pipes: [],
+      draw: function () {
+        const halfScreenHeight = scrn.height / 2; // 320px for 640px canvas
+        const minPipeLength = scrn.height / 4; // 160px for 640px canvas
+        for (let p of this.pipes) {
+          const topHeight = halfScreenHeight - this.gap / 2 + p.y; // Top of gap
+          const bottomY = topHeight + this.gap; // Bottom of gap
+
+          // Draw top pipe head (pointing downward)
+          sctx.drawImage(
+            this.spriteTop,
+            p.x,
+            topHeight - this.spriteTop.height * this.scale, // Head at bottom of top pipe
+            this.spriteTop.width * this.scale,
+            this.spriteTop.height * this.scale
+          );
+
+          // Draw top pipe body (from half screen to top of head, at least minPipeLength)
+          if (topHeight - this.spriteTop.height * this.scale > halfScreenHeight - minPipeLength) {
+            sctx.fillStyle = "#73c973"; // Pipe body color
+            sctx.fillRect(
+              p.x,
+              halfScreenHeight - minPipeLength,
+              this.spriteTop.width * this.scale,
+              (topHeight - this.spriteTop.height * this.scale) - (halfScreenHeight - minPipeLength)
+            );
+          }
+
+          // Draw bottom pipe head (pointing upward)
+          sctx.drawImage(
+            this.spriteBot,
+            p.x,
+            bottomY, // Head at top of bottom pipe
+            this.spriteBot.width * this.scale,
+            this.spriteBot.height * this.scale
+          );
+
+          // Draw bottom pipe body (from bottom of head to half screen, at least minPipeLength)
+          if (bottomY + this.spriteBot.height * this.scale < halfScreenHeight + minPipeLength) {
+            sctx.fillStyle = "#73c973";
+            sctx.fillRect(
+              p.x,
+              bottomY + this.spriteBot.height * this.scale,
+              this.spriteBot.width * this.scale,
+              (halfScreenHeight + minPipeLength) - (bottomY + this.spriteBot.height * this.scale)
+            );
+          }
+        }
+      },
+      update: function () {
+        if (state.curr != state.Play) return;
+        if (frames % 100 == 0) {
+          this.pipes.push({
+            x: scrn.width,
+            y: -100 * Math.min(Math.random() + 1, 1.8), // Adjusted to keep pipes near center
+          });
+          pipeCounter++;
+        }
+        this.pipes.forEach((p) => (p.x -= dx));
+        if (this.pipes.length && this.pipes[0].x < -this.spriteTop.width * this.scale) {
+          this.pipes.shift();
+          UI.score.curr += pipeCounter * 10;
+        }
+      },
+    };
+
+    const bird = {
+      sprite: new Image(),
+      x: 50,
+      y: 320,
+      speed: 0,
+      gravity: 0.15,
+      thrust: 4.0,
+      rotation: 0,
+      draw: function () {
+        sctx.save();
+        sctx.translate(this.x, this.y);
+        sctx.rotate(this.rotation * RAD);
+        sctx.drawImage(this.sprite, -this.sprite.width / 2, -this.sprite.height / 2);
+        sctx.restore();
+      },
+      update: function () {
+        switch (state.curr) {
+          case state.getReady:
+            this.rotation = 0;
+            this.y += frames % 10 == 0 ? Math.sin(frames * RAD) : 0;
+            break;
+          case state.Play:
+            this.y += this.speed;
+            this.speed += this.gravity;
+            this.rotation = Math.min(90, Math.max(-25, (90 * this.speed) / (this.thrust * 2)));
+            if (this.y + this.sprite.height / 2 >= scrn.height || this.collisioned()) {
+              state.curr = state.gameOver;
+              safePlay(SFX.hit);
+            }
+            break;
+          case state.gameOver:
+            if (this.y + this.sprite.height / 2 < scrn.height) {
+              this.y += this.speed;
+              this.speed += this.gravity * 2;
+              this.rotation = 90;
+            } else {
+              this.y = scrn.height - this.sprite.height / 2;
+              this.speed = 0;
+              this.rotation = 90;
+            }
+            break;
+        }
+      },
+      flap: function () {
+        if (this.y > 0) {
+          safePlay(SFX.flap);
+          this.speed = -this.thrust;
+        }
+      },
+      collisioned: function () {
+        if (!pipe.pipes.length) return false;
+        const halfScreenHeight = scrn.height / 2;
+        const minPipeLength = scrn.height / 4; // 160px
+        let b = this.sprite;
+        let p = pipe.pipes[0];
+        let r = b.height / 4 + b.width / 4;
+        let topHeight = halfScreenHeight - pipe.gap / 2 + p.y;
+        let roof = topHeight;
+        let floor = topHeight + pipe.gap;
+        if (this.x + r >= p.x && this.x - r < p.x + pipe.spriteTop.width * pipe.scale) {
+          // Check collision only within pipe regions (up to minPipeLength from half screen)
+          if (
+            (this.y - r <= roof && this.y - r >= halfScreenHeight - minPipeLength) || // Top pipe
+            (this.y + r >= floor && this.y + r <= halfScreenHeight + minPipeLength)   // Bottom pipe
+          ) {
+            return true;
+          }
+        }
+        return false;
+      },
+    };
+
+    const UI = {
+      getReady: { sprite: new Image() },
+      gameOver: { sprite: new Image() },
+      tap: [{ sprite: new Image() }, { sprite: new Image() }],
+      score: { curr: 0, best: 0 },
+      level: 1,
+      frame: 0,
+      buttonScale: 0.5,
+      draw: function () {
+        sctx.font = "28px Squada One";
+        sctx.fillStyle = "#FFFFFF";
+        sctx.strokeStyle = "#800080";
+        sctx.lineWidth = 2;
+        let x, y;
+        switch (state.curr) {
+          case state.getReady:
+            let scale = 0.5;
+            let btnW = this.getReady.sprite.width * scale;
+            let btnH = this.getReady.sprite.height * scale;
+            x = (scrn.width - this.getReady.sprite.width) / 2;
+            y = (scrn.height - this.getReady.sprite.height) / 2;
+            sctx.drawImage(this.getReady.sprite, x, y);
+            sctx.drawImage(this.tap[this.frame].sprite, x, y + this.getReady.sprite.height);
+            break;
+          case state.Play:
+            sctx.fillText(`LEVEL: ${this.level}`, 20, 50);
+            sctx.strokeText(`LEVEL: ${this.level}`, 20, 50);
+            sctx.fillText(`SCORE: ${this.score.curr}`, 20, 80);
+            sctx.strokeText(`SCORE: ${this.score.curr}`, 20, 80);
+            break;
+          case state.gameOver:
+            x = (scrn.width - this.gameOver.sprite.width) / 2;
+            y = (scrn.height - this.gameOver.sprite.height) / 2;
+            sctx.drawImage(this.gameOver.sprite, x, y);
+            sctx.drawImage(this.tap[this.frame].sprite, x, y + this.getReady.sprite.height);
+            sctx.font = "32px Squada One";
+            this.score.best = Math.max(this.score.curr, localStorage.getItem("best") || 0);
+            localStorage.setItem("best", this.score.best);
+            sctx.fillText(`SCORE: ${this.score.curr}`, 20, y + 15);
+            sctx.strokeText(`SCORE: ${this.score.curr}`, 20, y + 15);
+            sctx.fillText(`BEST: ${this.score.best}`, 20, y + 45);
+            sctx.strokeText(`BEST: ${this.score.best}`, 20, y + 45);
+            sctx.fillText(`LEVEL: ${this.level}`, 20, y + 75);
+            sctx.strokeText(`LEVEL: ${this.level}`, 20, y + 75);
+            break;
+        }
+      },
+      update: function () {
+        if (state.curr == state.Play) {
+          this.level = Math.floor(this.score.curr / 100) + 1;
+        }
+        if (state.curr == state.Play) return;
+        this.frame = frames % 10 == 0 ? (this.frame + 1) % this.tap.length : this.frame;
+      },
+    };
+
+    scrn.addEventListener("click", () => handleInput());
+    scrn.addEventListener("touchstart", () => handleInput());
+    scrn.addEventListener("keydown", (e) => {
+      if (e.keyCode == 32 || e.keyCode == 87 || e.keyCode == 38) handleInput();
+    });
+
+    function handleInput() {
+      switch (state.curr) {
+        case state.getReady:
+          state.curr = state.Play;
+          pipeCounter = 0;
+          break;
+        case state.Play:
+          bird.flap();
+          break;
+        case state.gameOver:
+          state.curr = state.getReady;
+          bird.speed = 0;
+          bird.y = 320;
+          pipe.pipes = [];
+          UI.score.curr = 0;
+          UI.level = 1;
+          pipeCounter = 0;
+          break;
+      }
+    }
+
+    //-nit Assets ====
+    bg.sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/background-otUUDlDjPe3gSjO1Ho3RIsMuHuf0cP.png?FAPt";
+    pipe.spriteTop.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/pipetop-emEpcX0HkwVqb6Jhwq07r9u2p5QFDg.png?xbyQ";
+    pipe.spriteBot.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/pipe-1kgK5b0pEZtBx93I6ZWqSjgS4Mie8U.png?C6RC";
+    bird.sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/bird-6kdXVX87B1SQsKNDKNxIxpQkbKLepc.png?r5dX";
+    UI.getReady.sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV";
+    UI.gameOver.sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV";
+    UI.tap[0].sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV";
+    UI.tap[1].sprite.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV";
+
+    function gameLoop() {
+      sctx.fillStyle = "#30c0df";
+      sctx.fillRect(0, 0, scrn.width, scrn.height);
+      bg.draw();
+      bg.update();
+      pipe.draw();
+      bird.draw();
+      UI.draw();
+      bird.update();
+      pipe.update();
+      UI.update();
+      frames++;
+      requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+  </script>
+</body>
+</html>
