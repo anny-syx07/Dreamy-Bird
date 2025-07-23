@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Angry Birds Minimal</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: black;
+        overflow: hidden;
+        user-select: none;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+        background: #000;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+
+      canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@latest/dist/index.min.js"></script>
+  </head>
+  <body>
+    <div id="game-container"></div>
+    <script>
+      const config = {
+        type: Phaser.CANVAS,
+        parent: "game-container",
+        width: 1280, // 16:9 resolution
+        height: 720,
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+        },
+        physics: {
+          default: "arcade",
+          arcade: {
+            gravity: { y: 500 },
+            debug: false,
+          },
+        },
+        scene: {
+          preload: preload,
+          create: create,
+          update: update,
+        },
+        canvasStyle: "display: block; width: 100%; height: 100%;",
+      };
+
+      const game = new Phaser.Game(config);
+
+      function preload() {
+        this.load.on("progress", (value) => {
+          console.log(`Loading: ${Math.round(value * 100)}%`);
+        });
+        this.load.on("complete", () => {
+          console.log("All assets loaded");
+        });
+        this.load.on("fileerror", (file) => {
+          console.error(`Error loading file: ${file.key}`);
+        });
+
+        this.load.image(
+          "background",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/background-pWc0OOSwlTBzlmviHWnRxn7ryI3ym2.png?0D1r"
+        );
+        this.load.image(
+          "bird",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/bird-6kdXVX87B1SQsKNDKNxIxpQkbKLepc.png?r5dX"
+        );
+        this.load.image(
+          "slingshot",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/slingshot-HuCzzGtWkt5xSWRQg06f5M7WQPiQsK.png?Tt92"
+        );
+        this.load.image(
+          "button",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV"
+        );
+        this.load.image(
+          "pig",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/4f53e97f-fbe3-47c1-bec1-28794a29989a/pig-AGJbXMSunKrV8D0dWwvWvYJwaJCeIe.png?VBXU"
+        );
+        this.load.image(
+          "block",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/4f53e97f-fbe3-47c1-bec1-28794a29989a/block-819SBuiQa6mW92vHk5lun2Um874X9B.png?ARjq"
+        );
+        this.load.audio(
+          "flap",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/flap-hOU0RRI06RTdOayr0EEnkUWO0gS5Sc.mp3?pHU7"
+        );
+        this.load.audio(
+          "hit",
+          "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/hit-9EbLzVtiNs8XYbH2t2TcUQgjEGmiWP.mp3?IK1m"
+        );
+      }
+
+      let bird;
+      let launched = false;
+      let ropeGraphics;
+      let gameStarted = false;
+      let playButton;
+      let blocks = [];
+      let pig;
+
+      function create() {
+        try {
+          this.add
+            .image(
+              this.cameras.main.width / 2,
+              this.cameras.main.height / 2,
+              "background"
+            )
+            .setDisplaySize(
+              this.cameras.main.width,
+              this.cameras.main.height
+            );
+
+          this.add.image(200, config.height - 100, "slingshot");
+
+          bird = this.physics.add.sprite(200, config.height - 100, "bird");
+          bird.setCollideWorldBounds(true);
+          bird.setBounce(0.2);
+          bird.setVisible(false);
+
+          ropeGraphics = this.add.graphics();
+          ropeGraphics.lineStyle(4, 0x8b4513, 1);
+
+          // Create left stack of 4 blocks (dynamic, no gravity initially)
+          for (let i = 0; i < 4; i++) {
+            let block = this.physics.add.sprite(400, config.height - 100 - i * 50, "block");
+            block.setBounce(0.1);
+            block.setMass(1);
+            block.body.setAllowGravity(false); // Disable gravity initially
+            blocks.push(block);
+          }
+
+          // Create right stack of 4 blocks with pig on top (dynamic, no gravity initially)
+          for (let i = 0; i < 4; i++) {
+            let block = this.physics.add.sprite(800, config.height - 100 - i * 50, "block");
+            block.setBounce(0.1);
+            block.setMass(1);
+            block.body.setAllowGravity(false); // Disable gravity initially
+            blocks.push(block);
+          }
+          pig = this.physics.add.sprite(800, config.height - 100 - 4 * 50, "pig");
+          pig.setBounce(0.1);
+          pig.setMass(0.5);
+          pig.body.setAllowGravity(false); // Disable gravity initially
+
+          playButton = this.add
+            .image(config.width / 2, config.height / 2, "button")
+            .setInteractive();
+
+          this.sound.add("flap");
+          this.sound.add("hit");
+
+          playButton.on("pointerdown", () => {
+            if (!gameStarted) {
+              gameStarted = true;
+              playButton.setVisible(false);
+              bird.setVisible(true);
+              if (window.FarcadeSDK) {
+                window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+              }
+            }
+          });
+
+          this.input.on("pointerdown", (pointer) => {
+            if (!launched && gameStarted && pointer.isDown) {
+              if (window.FarcadeSDK) {
+                window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+              }
+            }
+          });
+
+          this.input.on("pointermove", (pointer) => {
+            if (!launched && gameStarted) {
+              bird.x = pointer.x;
+              bird.y = pointer.y;
+            }
+          });
+
+          this.input.on("pointerup", (pointer) => {
+            if (!launched && gameStarted) {
+              launched = true;
+              const dx = 200 - pointer.x;
+              const dy = config.height - 100 - pointer.y;
+              bird.setVelocity(dx * 2, dy * 2);
+              this.sound.play("flap");
+              ropeGraphics.clear();
+            }
+          });
+
+          // Enable collisions
+          this.physics.add.collider(bird, blocks, (bird, block) => {
+            block.body.setAllowGravity(true); // Enable gravity on hit
+            this.sound.play("hit");
+          });
+          this.physics.add.collider(bird, pig, (bird, pig) => {
+            pig.body.setAllowGravity(true); // Enable gravity on hit
+            const velocity = bird.body.velocity.length();
+            if (velocity > 200) {
+              pig.destroy();
+              this.sound.play("hit");
+            }
+          });
+          this.physics.add.collider(blocks, blocks);
+          this.physics.add.collider(blocks, pig);
+          this.physics.add.collider(pig, pig);
+
+          if (window.FarcadeSDK) {
+            window.FarcadeSDK.singlePlayer.actions.ready();
+            window.FarcadeSDK.on("play_again", () => {
+              launched = false;
+              gameStarted = false;
+              bird.setPosition(200, config.height - 100);
+              bird.setVelocity(0, 0);
+              bird.setVisible(false);
+              ropeGraphics.clear();
+              playButton.setVisible(true);
+              playButton.setPosition(
+                this.cameras.main.width / 2,
+                this.cameras.main.height / 2
+              );
+              // Reset blocks
+              blocks.forEach(block => block.destroy());
+              blocks = [];
+              for (let i = 0; i < 4; i++) {
+                let block = this.physics.add.sprite(400, config.height - 100 - i * 50, "block");
+                block.setBounce(0.1);
+                block.setMass(1);
+                block.body.setAllowGravity(false); // Disable gravity initially
+                blocks.push(block);
+              }
+              for (let i = 0; i < 4; i++) {
+                let block = this.physics.add.sprite(800, config.height - 100 - i * 50, "block");
+                block.setBounce(0.1);
+                block.setMass(1);
+                block.body.setAllowGravity(false); // Disable gravity initially
+                blocks.push(block);
+              }
+              // Reset pig
+              if (pig) pig.destroy();
+              pig = this.physics.add.sprite(800, config.height - 100 - 4 * 50, "pig");
+              pig.setBounce(0.1);
+              pig.setMass(0.5);
+              pig.body.setAllowGravity(false); // Disable gravity initially
+            });
+            window.FarcadeSDK.on("toggle_mute", (data) => {
+              this.sound.mute = data.isMuted;
+            });
+          }
+        } catch (error) {
+          console.error("Error in create:", error);
+        }
+      }
+
+      function update() {
+        try {
+          if (!launched && gameStarted) {
+            ropeGraphics.clear();
+            ropeGraphics.lineStyle(4, 0x8b4513, 1);
+            ropeGraphics.lineBetween(
+              190, config.height - 110,
+              bird.x, bird.y
+            );
+            ropeGraphics.lineBetween(
+              210, config.height - 110,
+              bird.x, bird.y
+            );
+          }
+
+          if (launched && bird.y > config.height - bird.height) {
+            this.sound.play("hit");
+            if (window.FarcadeSDK) {
+              window.FarcadeSDK.singlePlayer.actions.gameOver({ score: 1 });
+            }
+            launched = false;
+            gameStarted = false;
+            bird.setPosition(200, config.height - 100);
+            bird.setVelocity(0, 0);
+            bird.setVisible(false);
+            ropeGraphics.clear();
+            playButton.setVisible(true);
+            playButton.setPosition(
+              game.scale.width / 2,
+              game.scale.height / 2
+            );
+          }
+
+          // Check if pig is destroyed for game over condition
+          if (launched && !pig.scene) {
+            if (window.FarcadeSDK) {
+              window.FarcadeSDK.singlePlayer.actions.gameOver({ score: 100 });
+            }
+            launched = false;
+            gameStarted = false;
+            bird.setPosition(200, config.height - 100);
+            bird.setVelocity(0, 0);
+            bird.setVisible(false);
+            ropeGraphics.clear();
+            playButton.setVisible(true);
+            playButton.setPosition(
+              game.scale.width / 2,
+              game.scale.height / 2
+            );
+          }
+        } catch (error) {
+          console.error("Error in update:", error);
+        }
+      }
+    </script>
+  </body>
+</html>
