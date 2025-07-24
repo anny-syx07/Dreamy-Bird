@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Angry Birds Matter.js</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      overflow: hidden;
+      user-select: none;
+      width: 100vw;
+      height: 100vh;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+      background: #000;
+    }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="game-container"></div>
+  <script>
+    const config = {
+      type: Phaser.AUTO,
+      parent: "game-container",
+      width: 1280,
+      height: 720,
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
+      physics: {
+        default: "matter",
+        matter: {
+          gravity: { y: 1 },
+          debug: false
+        }
+      },
+      scene: {
+        preload: preload,
+        create: create,
+        update: update
+      }
+    };
+
+    const game = new Phaser.Game(config);
+
+    let bird, pig, playButton;
+    let blocks = [];
+    let ground;
+    let ropeGraphics;
+    let launched = false;
+    let gameStarted = false;
+
+    let pigHP = 3; // Pig có 3 máu
+    let score = 0;
+    let lives = 3; // 3 bird (3 mạng)
+    let scoreText, livesText;
+
+    const slingX = 200;
+    const slingY = 520;
+    const maxPull = 150;
+    const basePower = 0.3;
+
+    const towerScale = 0.65;
+    const towerGap = 0;
+
+    function preload() {
+      this.load.image("background", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/background-pWc0OOSwlTBzlmviHWnRxn7ryI3ym2.png?0D1r");
+      this.load.image("bird", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/bird-6kdXVX87B1SQsKNDKNxIxpQkbKLepc.png?r5dX");
+      this.load.image("slingshot", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/slingshot-HuCzzGtWkt5xSWRQg06f5M7WQPiQsK.png?Tt92");
+      this.load.image("button", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/ee9be337-c5c5-4965-942a-aa11aee79648/button-H9CSPYDxrh3316dkS5dFh2rReQhDgt.png?mSPV");
+      this.load.image("pig", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/4f53e97f-fbe3-47c1-bec1-28794a29989a/pig-AGJbXMSunKrV8D0dWwvWvYJwaJCeIe.png?VBXU");
+      this.load.image("block", "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/4f53e97f-fbe3-47c1-bec1-28794a29989a/block-819SBuiQa6mW92vHk5lun2Um874X9B.png?ARjq");
+    }
+
+    function create() {
+      // Background
+      this.add.image(config.width / 2, config.height / 2, "background")
+        .setDisplaySize(config.width, config.height);
+
+      this.add.image(slingX, slingY, "slingshot").setScale(0.6).setDepth(5);
+      ropeGraphics = this.add.graphics();
+
+      ground = this.matter.add.rectangle(config.width / 2, config.height - 20, config.width, 40, { isStatic: true });
+
+      // Bird
+      bird = this.matter.add.image(slingX, slingY, "bird");
+      bird.setCircle(bird.width / 2);
+      bird.setScale(0.5);
+      bird.setStatic(true);
+      bird.setVisible(false);
+
+      // Tower
+      createTower.call(this);
+
+      // UI Text (score + lives)
+      scoreText = this.add.text(20, 20, `Score: 0`, {
+        fontSize: '28px',
+        fontFamily: 'Arial',
+        color: '#ffffff',
+        stroke: '#a020f0',
+        strokeThickness: 4
+      }).setScrollFactor(0);
+
+      livesText = this.add.text(20, 60, `Birds: ${lives}`, {
+        fontSize: '28px',
+        fontFamily: 'Arial',
+        color: '#ffffff',
+        stroke: '#a020f0',
+        strokeThickness: 4
+      }).setScrollFactor(0);
+
+      // Play button
+      playButton = this.add.image(config.width / 2, config.height / 2, "button")
+        .setInteractive()
+        .setDepth(1000);
+
+      playButton.on("pointerdown", () => {
+        if (!gameStarted && lives > 0) {
+          gameStarted = true;
+          playButton.setVisible(false);
+          bird.setVisible(true);
+        }
+      });
+
+      // Drag mechanics
+      this.input.on("pointermove", (pointer) => {
+        if (!launched && gameStarted) {
+          let dx = pointer.x - slingX;
+          let dy = pointer.y - slingY;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > maxPull) {
+            let ratio = maxPull / dist;
+            dx *= ratio;
+            dy *= ratio;
+          }
+          bird.setPosition(slingX + dx, slingY + dy);
+        }
+      });
+
+      this.input.on("pointerup", () => {
+        if (!launched && gameStarted) {
+          launched = true;
+          const dx = slingX - bird.x;
+          const dy = slingY - bird.y;
+          bird.setStatic(false);
+          bird.setIgnoreGravity(false);
+          bird.setFrictionAir(0.002);
+          bird.applyForce({ x: dx * basePower * 0.01, y: dy * basePower * 0.01 });
+          ropeGraphics.clear();
+        }
+      });
+
+      // Va chạm
+      this.matter.world.on('collisionstart', (event, bodyA, bodyB) => {
+        let names = [bodyA.gameObject?.texture?.key, bodyB.gameObject?.texture?.key];
+        if (names.includes("bird") && names.includes("block")) {
+          // Bird trúng block
+          score += 30;
+          scoreText.setText(`Score: ${score}`);
+          restoreBird();
+        }
+        if (names.includes("bird") && names.includes("pig")) {
+          // Bird trúng pig
+          pigHP--;
+          if (pigHP <= 0) {
+            score += 500;
+            scoreText.setText(`Score: ${score}`);
+            pig.destroy();
+          } else {
+            score += 100;
+          }
+          restoreBird();
+        }
+      });
+    }
+
+    function createTower() {
+      const startX1 = 800;
+      const startX2 = 900;
+      const baseY = config.height - 100;
+
+      const blockTexture = this.textures.get("block").getSourceImage();
+      const blockHeight = blockTexture.height * towerScale;
+      const pigTexture = this.textures.get("pig").getSourceImage();
+      const pigHeight = pigTexture.height * towerScale;
+
+      for (let i = 0; i < 4; i++) {
+        let yPos = baseY - i * (blockHeight + towerGap);
+        let block = this.matter.add.image(startX1, yPos, "block");
+        block.setScale(towerScale);
+        block.setRectangle(blockTexture.width * towerScale, blockHeight);
+        block.setBounce(0.2);
+        block.setFriction(0.6);
+        blocks.push(block);
+      }
+
+      for (let i = 0; i < 4; i++) {
+        let yPos = baseY - i * (blockHeight + towerGap);
+        let block = this.matter.add.image(startX2, yPos, "block");
+        block.setScale(towerScale);
+        block.setRectangle(blockTexture.width * towerScale, blockHeight);
+        block.setBounce(0.2);
+        block.setFriction(0.6);
+        blocks.push(block);
+      }
+
+      const pigY = baseY - 4 * (blockHeight + towerGap) - pigHeight / 2;
+      pig = this.matter.add.image(startX2, pigY, "pig");
+      pig.setScale(towerScale);
+      pig.setCircle((pigTexture.width * towerScale) / 2);
+      pig.setBounce(0.4);
+      pig.setFriction(0.5);
+      pigHP = 3;
+    }
+
+    function restoreBird() {
+      // Hồi lại bird ngay sau khi bắn trúng
+      launched = false;
+      bird.setPosition(slingX, slingY);
+      bird.setVelocity(0, 0);
+      bird.setAngularVelocity(0);
+      bird.setRotation(0);
+      bird.setStatic(true);
+    }
+
+    function nextLife(scene) {
+      lives--;
+      livesText.setText(`Birds: ${lives}`);
+      if (lives > 0) {
+        restoreBird();
+        gameStarted = false;
+        playButton.setVisible(true);
+      } else {
+        playButton.setVisible(true);
+        playButton.setTexture("button");
+        playButton.setInteractive();
+      }
+    }
+
+    function resetGame(scene) {
+      launched = false;
+      gameStarted = false;
+      bird.setPosition(slingX, slingY);
+      bird.setVelocity(0, 0);
+      bird.setAngularVelocity(0);
+      bird.setRotation(0);
+      bird.setStatic(true);
+      bird.setVisible(false);
+      ropeGraphics.clear();
+      playButton.setVisible(true);
+      blocks.forEach(b => b.destroy());
+      blocks = [];
+      if (pig) pig.destroy();
+      createTower.call(scene);
+    }
+
+    function update() {
+      if (!launched && gameStarted) {
+        ropeGraphics.clear();
+        ropeGraphics.lineStyle(6, 0x8b4513, 1);
+        ropeGraphics.lineBetween(slingX - 20, slingY - 90, bird.x, bird.y);
+        ropeGraphics.lineBetween(slingX + 20, slingY - 80, bird.x, bird.y);
+      }
+
+      // Bird ra ngoài màn -> mất 1 mạng
+      if (launched && (bird.y > config.height + 200 || bird.x > config.width + 200)) {
+        nextLife(this);
+      }
+
+      // Pig rơi khỏi màn -> thắng
+      if (launched && pig && pig.y > config.height) {
+        score += 500;
+        scoreText.setText(`Score: ${score}`);
+        resetGame(this);
+      }
+    }
+  </script>
+</body>
+</html>
